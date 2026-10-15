@@ -5,14 +5,23 @@ A super simple FastAPI application that allows students to view and sign up
 for extracurricular activities at Mergington High School.
 """
 
-from fastapi import FastAPI, HTTPException
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse
 import os
+import re
 from pathlib import Path
+
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 app = FastAPI(title="Mergington High School API",
               description="API for viewing and signing up for extracurricular activities")
+
+EMAIL_PATTERN = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
+
+
+def is_valid_email(email: str) -> bool:
+    return bool(email) and bool(EMAIL_PATTERN.match(email.strip()))
+
 
 # Mount the static files directory
 current_dir = Path(__file__).parent
@@ -53,15 +62,27 @@ def get_activities():
 
 
 @app.post("/activities/{activity_name}/signup")
-def signup_for_activity(activity_name: str, email: str):
+def signup_for_activity(activity_name: str, email: str = Query(..., min_length=1)):
     """Sign up a student for an activity"""
     # Validate activity exists
     if activity_name not in activities:
         raise HTTPException(status_code=404, detail="Activity not found")
 
+    normalized_email = email.strip()
+    if not is_valid_email(normalized_email):
+        raise HTTPException(status_code=422, detail="Invalid email address")
+
     # Get the specific activity
     activity = activities[activity_name]
+    participants = [participant.lower() for participant in activity["participants"]]
+    normalized_email_lower = normalized_email.lower()
+
+    if normalized_email_lower in participants:
+        raise HTTPException(status_code=409, detail=f"{normalized_email} is already signed up for {activity_name}")
+
+    if len(activity["participants"]) >= activity["max_participants"]:
+        raise HTTPException(status_code=409, detail=f"{activity_name} is full")
 
     # Add student
-    activity["participants"].append(email)
-    return {"message": f"Signed up {email} for {activity_name}"}
+    activity["participants"].append(normalized_email_lower)
+    return {"message": f"Signed up {normalized_email_lower} for {activity_name}"}
